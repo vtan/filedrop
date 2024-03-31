@@ -20,7 +20,13 @@ const PORT: u16 = 8000;
 #[derive(Debug, Clone)]
 struct AppState {
     file_dir: PathBuf,
-    urls: Vec<String>,
+    listen_urls: Vec<ListenUrl>,
+}
+
+#[derive(Debug, Clone)]
+struct ListenUrl {
+    url: String,
+    qr_code_svg: String,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -32,12 +38,23 @@ async fn main() {
     let file_dir = file_dir.canonicalize().unwrap();
     println!("Storing files in {}", file_dir.to_string_lossy());
 
-    let urls = list_urls();
+    let listen_urls = {
+        let urls = list_urls();
+        urls.into_iter()
+            .map(|url| {
+                let qr_code_svg = render_url_svg(&url);
+                ListenUrl { url, qr_code_svg }
+            })
+            .collect()
+    };
 
-    let app_state = AppState { file_dir, urls };
+    let app_state = AppState {
+        file_dir,
+        listen_urls,
+    };
 
-    for url in &app_state.urls {
-        println!("Listening at {url}");
+    for url in &app_state.listen_urls {
+        println!("Listening at {}", url.url);
     }
 
     let serve_dir = ServeDir::new(app_state.file_dir.clone());
@@ -77,6 +94,16 @@ fn list_urls() -> Vec<String> {
         .collect()
 }
 
+fn render_url_svg(url: &str) -> String {
+    QrCode::new(url)
+        .unwrap()
+        .render()
+        .min_dimensions(200, 200)
+        .dark_color(qrcode::render::svg::Color("#000000"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build()
+}
+
 async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
     let mut entries = vec![];
     let mut reader = tokio::fs::read_dir(file_dir).await.unwrap();
@@ -90,7 +117,7 @@ async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
 async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
     let files = list_files(&app_state.file_dir).await;
 
-    let html = html::root::Html::builder()
+    let mut html = html::root::Html::builder()
         .lang("en")
         .head(|head| {
             head.meta(|meta| meta.charset("utf-8"))
@@ -125,22 +152,18 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
                 })
                 .heading_1(|h| h.text("Connection"))
                 .division(|mut div| {
-                    for url in &app_state.urls {
-                        let qr_code = QrCode::new(url)
-                            .unwrap()
-                            .render::<qrcode::render::unicode::Dense1x2>()
-                            .dark_color(qrcode::render::unicode::Dense1x2::Light)
-                            .light_color(qrcode::render::unicode::Dense1x2::Dark)
-                            .build();
-                        div = div
-                            .preformatted_text(|pre| pre.style("font-size: 10px").text(qr_code))
-                            .span(|span| span.text(url.clone()));
+                    for url in &app_state.listen_urls {
+                        div = div.text("{svg}").division(|div| div.text(url.url.clone()));
                     }
                     div
                 })
         })
         .build()
         .to_string();
+
+    for url in &app_state.listen_urls {
+        html = html.replacen("{svg}", &url.qr_code_svg, 1);
+    }
 
     Html(html)
 }

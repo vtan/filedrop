@@ -7,6 +7,6 @@ edition = "2021"
 axum = { version = "0.7.5", features = ["http1", "multipart", "tokio"], default-features = false }
 html = "0.6.3"
 pnet = "0.34.0"
-qrcode = { version = "0.13", default-features = false }
+qrcode = { version = "0.13", features = ["svg"], default-features = false }
 tokio = { version = "1.37.0", features = ["fs", "net", "rt"] }
 tower-http = { version = "0.5.2", features = ["fs"] }
