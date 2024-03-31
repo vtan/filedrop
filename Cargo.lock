@@ -143,6 +143,7 @@ dependencies = [
  "axum",
  "html",
  "pnet",
+ "qrcode",
  "tokio",
  "tower-http",
 ]
@@ -551,6 +552,12 @@ checksum = "e835ff2298f5721608eb1a980ecaee1aef2c132bf95ecc026a11b7bf3c01c02e"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "166f136dfdb199f98186f3649cf7a0536534a61417a1a30221b492b4fb60ce3f"
 
 [[package]]
 name = "quote"

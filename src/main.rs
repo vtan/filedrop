@@ -1,9 +1,6 @@
 #![recursion_limit = "512"]
 
-use std::{
-    net::IpAddr,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use axum::{
     extract::{DefaultBodyLimit, Multipart, State},
@@ -11,6 +8,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use qrcode::QrCode;
 use tokio::{
     fs::{DirEntry, File},
     io::AsyncWriteExt,
@@ -22,6 +20,7 @@ const PORT: u16 = 8000;
 #[derive(Debug, Clone)]
 struct AppState {
     file_dir: PathBuf,
+    urls: Vec<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -33,10 +32,12 @@ async fn main() {
     let file_dir = file_dir.canonicalize().unwrap();
     println!("Storing files in {}", file_dir.to_string_lossy());
 
-    let app_state = AppState { file_dir };
+    let urls = list_urls();
 
-    for ip in list_ips() {
-        println!("Listening on {ip}:{PORT}");
+    let app_state = AppState { file_dir, urls };
+
+    for url in &app_state.urls {
+        println!("Listening at {url}");
     }
 
     let serve_dir = ServeDir::new(app_state.file_dir.clone());
@@ -61,7 +62,7 @@ fn get_file_directory() -> PathBuf {
     dir
 }
 
-fn list_ips() -> impl Iterator<Item = IpAddr> {
+fn list_urls() -> Vec<String> {
     pnet::datalink::interfaces()
         .into_iter()
         .filter(|interface| {
@@ -69,7 +70,11 @@ fn list_ips() -> impl Iterator<Item = IpAddr> {
         })
         .flat_map(|interface| interface.ips.into_iter())
         .filter(|ip| ip.is_ipv4())
-        .map(|ip| ip.ip())
+        .map(|ip| {
+            let ip = ip.ip();
+            format!("http://{ip}:{PORT}")
+        })
+        .collect()
 }
 
 async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
@@ -89,6 +94,10 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
         .lang("en")
         .head(|head| {
             head.meta(|meta| meta.charset("utf-8"))
+                .meta(|meta| {
+                    meta.name("viewport")
+                        .content("width=device-width, initial-scale=1")
+                })
                 .title(|title| title.text("filedrop"))
         })
         .body(|body| {
@@ -104,12 +113,30 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
                 })
                 .heading_1(|h| h.text("Uploaded files"))
                 .unordered_list(|mut ul| {
-                    for dir_entry in files {
+                    for dir_entry in &files {
                         let file_name = dir_entry.file_name().to_string_lossy().to_string();
                         let url = format!("/files/{file_name}");
                         ul = ul.list_item(|li| li.anchor(|a| a.href(url).text(file_name)));
                     }
+                    if files.is_empty() {
+                        ul = ul.list_item(|li| li.text("No files"))
+                    }
                     ul
+                })
+                .heading_1(|h| h.text("Connection"))
+                .division(|mut div| {
+                    for url in &app_state.urls {
+                        let qr_code = QrCode::new(url)
+                            .unwrap()
+                            .render::<qrcode::render::unicode::Dense1x2>()
+                            .dark_color(qrcode::render::unicode::Dense1x2::Light)
+                            .light_color(qrcode::render::unicode::Dense1x2::Dark)
+                            .build();
+                        div = div
+                            .preformatted_text(|pre| pre.style("font-size: 10px").text(qr_code))
+                            .span(|span| span.text(url.clone()));
+                    }
+                    div
                 })
         })
         .build()
