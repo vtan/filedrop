@@ -26,10 +26,11 @@ struct AppState {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let file_dir = get_file_directory().canonicalize().unwrap();
+    let file_dir = get_file_directory();
     if !file_dir.exists() {
         std::fs::create_dir_all(file_dir.clone()).unwrap();
     }
+    let file_dir = file_dir.canonicalize().unwrap();
     println!("Storing files in {}", file_dir.to_string_lossy());
 
     let app_state = AppState { file_dir };
