@@ -1,6 +1,9 @@
-#![recursion_limit = "512"]
+pub mod template;
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use axum::{
     extract::{DefaultBodyLimit, Multipart, State},
@@ -15,12 +18,15 @@ use tokio::{
 };
 use tower_http::services::ServeDir;
 
+use crate::template::Template;
+
 const PORT: u16 = 8000;
 
 #[derive(Debug, Clone)]
 struct AppState {
     file_dir: PathBuf,
     listen_urls: Vec<ListenUrl>,
+    templates: Templates,
 }
 
 #[derive(Debug, Clone)]
@@ -29,8 +35,27 @@ struct ListenUrl {
     qr_code_svg: String,
 }
 
+#[derive(Debug, Clone)]
+struct Templates {
+    root: Template,
+    file_list_item: Template,
+    qr_code_item: Template,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let templates = {
+        let templates = Template::many(include_str!("index.html"));
+        let [root, file_list_item, qr_code_item] = templates.as_slice() else {
+            unreachable!()
+        };
+        Templates {
+            root: root.clone(),
+            file_list_item: file_list_item.clone(),
+            qr_code_item: qr_code_item.clone(),
+        }
+    };
+
     let file_dir = get_file_directory();
     if !file_dir.exists() {
         std::fs::create_dir_all(file_dir.clone()).unwrap();
@@ -51,6 +76,7 @@ async fn main() {
     let app_state = AppState {
         file_dir,
         listen_urls,
+        templates,
     };
 
     for url in &app_state.listen_urls {
@@ -95,13 +121,14 @@ fn list_urls() -> Vec<String> {
 }
 
 fn render_url_svg(url: &str) -> String {
-    QrCode::new(url)
+    let xml = QrCode::new(url)
         .unwrap()
         .render()
         .min_dimensions(200, 200)
         .dark_color(qrcode::render::svg::Color("#000000"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
-        .build()
+        .build();
+    xml.split_once("?>").unwrap().1.to_string()
 }
 
 async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
@@ -117,53 +144,31 @@ async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
 async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
     let files = list_files(&app_state.file_dir).await;
 
-    let mut html = html::root::Html::builder()
-        .lang("en")
-        .head(|head| {
-            head.meta(|meta| meta.charset("utf-8"))
-                .meta(|meta| {
-                    meta.name("viewport")
-                        .content("width=device-width, initial-scale=1")
-                })
-                .title(|title| title.text("filedrop"))
-        })
-        .body(|body| {
-            body.heading_1(|h| h.text("Upload a file"))
-                .form(|form| {
-                    form.action("/upload")
-                        .method("post")
-                        .enctype("multipart/form-data")
-                        .division(|div| {
-                            div.input(|input| input.type_("file").name("file").required(""))
-                        })
-                        .button(|button| button.text("Upload"))
-                })
-                .heading_1(|h| h.text("Uploaded files"))
-                .unordered_list(|mut ul| {
-                    for dir_entry in &files {
-                        let file_name = dir_entry.file_name().to_string_lossy().to_string();
-                        let url = format!("/files/{file_name}");
-                        ul = ul.list_item(|li| li.anchor(|a| a.href(url).text(file_name)));
-                    }
-                    if files.is_empty() {
-                        ul = ul.list_item(|li| li.text("No files"))
-                    }
-                    ul
-                })
-                .heading_1(|h| h.text("Connection"))
-                .division(|mut div| {
-                    for url in &app_state.listen_urls {
-                        div = div.text("{svg}").division(|div| div.text(url.url.clone()));
-                    }
-                    div
-                })
-        })
-        .build()
-        .to_string();
+    let file_listing = app_state
+        .templates
+        .file_list_item
+        .render_many(files.iter().map(|file| {
+            HashMap::from([(
+                "file_name".to_string(),
+                file.file_name().to_string_lossy().to_string(),
+            )])
+        }));
 
-    for url in &app_state.listen_urls {
-        html = html.replacen("{svg}", &url.qr_code_svg, 1);
-    }
+    let qr_code_listing =
+        app_state
+            .templates
+            .qr_code_item
+            .render_many(app_state.listen_urls.iter().map(|url| {
+                HashMap::from([
+                    ("url".to_string(), url.url.as_str()),
+                    ("svg".to_string(), &url.qr_code_svg.as_str()),
+                ])
+            }));
+
+    let html = app_state.templates.root.render(&HashMap::from([
+        ("file_listing".to_string(), file_listing.as_str()),
+        ("qr_code_listing".to_string(), qr_code_listing.as_str()),
+    ]));
 
     Html(html)
 }

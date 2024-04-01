@@ -141,9 +141,9 @@ name = "filedrop"
 version = "0.1.0"
 dependencies = [
  "axum",
- "html",
  "pnet",
  "qrcode",
+ "regex-lite",
  "tokio",
  "tower-http",
 ]
@@ -204,21 +204,6 @@ name = "glob"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
-
-[[package]]
-name = "html"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "944d7db81871c611549302f3014418fedbcfbc46902f97e6a1c4f53e785903d2"
-dependencies = [
- "html-sys",
-]
-
-[[package]]
-name = "html-sys"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13eca55667a5657dd1b86db77c5fe2d1810e3f9413e9555a2c4c461733dd2573"
 
 [[package]]
 name = "http"
@@ -590,6 +575,12 @@ dependencies = [
  "memchr",
  "regex-syntax",
 ]
+
+[[package]]
+name = "regex-lite"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30b661b2f27137bdbc16f00eda72866a92bb28af1753ffbd56744fb6e2e9cd8e"
 
 [[package]]
 name = "regex-syntax"
