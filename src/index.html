@@ -6,62 +6,102 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
-      font-family: serif;
+      font-family: sans-serif;
       font-size: 12pt;
-    }
-
-    h1 {
-      font-family: serif;
-      font-size: 18pt;
+      background-color: #f7f7f7;
     }
 
     main {
-      max-width: 600px;
+      max-width: 640px;
       margin: 1rem auto;
+    }
+
+    .fg-panel {
+      padding: 1rem;
+      background-color: #ffffff;
+      border: 1px solid #e8e8e8;
+      border-radius: 8px;
+      box-shadow: #f0f0f0 0 1px 4px;
+    }
+
+    h1 {
+      margin: 1.5rem 0 0.5rem 0;
+      padding: 0;
+      font-size: 18pt;
     }
 
     input[name="file"] {
       display: block;
-      margin: 0 0 0.25rem 0;
+      margin: 0 0 0.5rem 0;
       padding: 0;
     }
 
     .file-listing {
       margin: 0;
-      padding: 0;
     }
 
     .file-listing > li {
       display: flex;
-      margin: 0 0 0.25rem 0;
+      margin: 0;
       padding: 0;
+    }
+
+    .file-listing > li:not(:last-child) {
+      margin: 0 0 0.5rem 0;
     }
 
     .file-listing > li > a {
       flex: auto;
     }
 
-    .connection-listing > .connection {
-      max-width: 240px;
+    .connection-listing {
       display: flex;
       padding: 1rem 1rem 1rem 0;
     }
 
-    .connection-listing > .connection > svg {
-      flex-grow: 1;
+    .qr-codes {
+      flex-grow: 0;
       flex-shrink: 0;
       flex-basis: auto;
-      margin-right: 2rem;
+      min-width: 200px;
+      margin: 0 2rem 0 1rem;
     }
 
-    .connection-listing > .connection > div {
+    .qr-codes:not(:has(> svg[data-selected])) > svg:not(:first-child),
+    .qr-codes:has(> svg[data-selected]) > svg:not([data-selected])
+    {
+      display: none;
+    }
+
+    .connection-selectors {
+      flex: 1;
+    }
+
+    .connection {
+      padding: 0.5rem;
+      background-color: #f0f0f0;
+      border: 1px solid #e8e8e8;
+      border-radius: 8px;
+      font-weight: bold;
+    }
+
+    .connection:not(:last-child) {
+      margin-bottom: 0.5rem;
+    }
+
+    .connection-selectors:not(:has(> .connection[data-selected])) > .connection:first-child,
+    .connection-selectors > .connection[data-selected]
+    {
+      background-color: #808080;
+      border-color: #787878;
+      color: #f8f8f8;
     }
   </style>
 </head>
 <body>
   <main>
     <h1>Upload a file</h1>
-    <form action="/upload" method="post" enctype="multipart/form-data">
+    <form action="/upload" method="post" enctype="multipart/form-data" class="fg-panel">
       <div>
         <input type="file" name="file" />
       </div>
@@ -69,13 +109,18 @@
     </form>
 
     <h1>Uploaded files</h1>
-    <ul class="file-listing">
+    <ul class="file-listing fg-panel">
       @{file_listing}
     </ul>
 
     <h1>Connection</h1>
-    <div class="connection-listing">
-      @{qr_code_listing}
+    <div class="connection-listing fg-panel">
+      <div class="qr-codes">
+        @{qr_code_listing}
+      </div>
+      <div class="connection-selectors">
+        @{connection_listing}
+      </div>
     </div>
   </main>
 
@@ -93,6 +138,27 @@
     }
 
     document.querySelector("input[name=file]").addEventListener("change", onFileSelect);
+
+    const onConnectionSelect = (selected) => () => {
+      document.querySelectorAll(".qr-codes > svg").forEach((e, i) => {
+        if (i === selected) {
+          e.dataset.selected = "true";
+        } else {
+          delete e.dataset.selected;
+        }
+      });
+      document.querySelectorAll(".connection").forEach((e, i) => {
+        if (i === selected) {
+          e.dataset.selected = "true";
+        } else {
+          delete e.dataset.selected;
+        }
+      });
+    };
+
+    document.querySelectorAll(".connection").forEach((e, i) => {
+      e.addEventListener("click", onConnectionSelect(i));
+    });
   </script>
 </body>
 </html>
@@ -104,10 +170,9 @@
   <span>{size}<span>
 </li>
 ---
+@{svg}
+---
 <div class="connection">
-  @{svg}
-  <div>
-    <div>{ip}</div>
-    <div>{interface}</div>
-  </div>
+  <div>{ip}</div>
+  <div>{interface}</div>
 </div>

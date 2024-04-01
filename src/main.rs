@@ -3,6 +3,7 @@ pub mod template;
 use std::{
     borrow::Cow,
     collections::HashMap,
+    net::{IpAddr, Ipv6Addr},
     path::{Path, PathBuf},
 };
 
@@ -12,6 +13,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use pnet::ipnetwork::Ipv6Network;
 use qrcode::QrCode;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::services::ServeDir;
@@ -30,7 +32,7 @@ struct AppState {
 struct ListenUrl {
     is_loopback: bool,
     interface: String,
-    ip: String,
+    ip: IpAddr,
     url: String,
     qr_code_svg: String,
 }
@@ -40,6 +42,7 @@ struct Templates {
     root: Template,
     file_list_item: Template,
     qr_code_item: Template,
+    connection_item: Template,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +80,7 @@ async fn main() {
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
         .with_state(app_state);
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", PORT))
+    let listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, PORT))
         .await
         .unwrap();
 
@@ -91,7 +94,9 @@ fn get_file_directory() -> PathBuf {
 }
 
 fn list_urls() -> Vec<ListenUrl> {
-    pnet::datalink::interfaces()
+    let ipv6_link_local: Ipv6Network = "fe80::/10".parse().unwrap();
+
+    let mut result = pnet::datalink::interfaces()
         .into_iter()
         .filter(|interface| interface.is_lower_up())
         .flat_map(|interface| {
@@ -99,11 +104,17 @@ fn list_urls() -> Vec<ListenUrl> {
             interface
                 .ips
                 .into_iter()
-                .filter(|ip| ip.is_ipv4())
+                .filter(|ip| match ip.ip() {
+                    IpAddr::V4(_) => true,
+                    IpAddr::V6(ipv6) => !ipv6_link_local.contains(ipv6),
+                })
                 .map(move |ip| {
                     let ip = ip.ip();
-                    let url = format!("http://{ip}:{PORT}");
-                    let ip = ip.to_string();
+                    let url = if ip.is_ipv4() {
+                        format!("http://{ip}:{PORT}")
+                    } else {
+                        format!("http://[{ip}]:{PORT}")
+                    };
                     let interface = interface.name.clone();
                     let qr_code_svg = render_url_svg(&url);
 
@@ -116,7 +127,9 @@ fn list_urls() -> Vec<ListenUrl> {
                     }
                 })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    result.sort_by_key(|ip| (!ip.is_loopback, ip.interface.clone(), ip.ip));
+    result
 }
 
 fn render_url_svg(url: &str) -> String {
@@ -168,12 +181,13 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
         };
         let templates = Template::many(&templates);
 
-        let [root, file_list_item, qr_code_item] = templates.as_slice() else {
+        let [root, file_list_item, qr_code_item, connection_item] = templates.as_slice() else {
             unreachable!()
         };
         Templates {
             root: root.clone(),
             file_list_item: file_list_item.clone(),
+            connection_item: connection_item.clone(),
             qr_code_item: qr_code_item.clone(),
         }
     };
@@ -192,11 +206,18 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
             .listen_urls
             .iter()
             .filter(|url| !url.is_loopback)
+            .map(|url| HashMap::from([("svg".to_string(), url.qr_code_svg.as_str())])),
+    );
+
+    let connection_listing = templates.connection_item.render_many(
+        app_state
+            .listen_urls
+            .iter()
+            .filter(|url| !url.is_loopback)
             .map(|url| {
                 HashMap::from([
-                    ("interface".to_string(), url.interface.as_str()),
-                    ("ip".to_string(), url.ip.as_str()),
-                    ("svg".to_string(), &url.qr_code_svg.as_str()),
+                    ("interface".to_string(), url.interface.clone()),
+                    ("ip".to_string(), url.ip.to_string()),
                 ])
             }),
     );
@@ -204,6 +225,10 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
     let html = templates.root.render(&HashMap::from([
         ("file_listing".to_string(), file_listing.as_str()),
         ("qr_code_listing".to_string(), qr_code_listing.as_str()),
+        (
+            "connection_listing".to_string(),
+            connection_listing.as_str(),
+        ),
     ]));
 
     Html(html)
