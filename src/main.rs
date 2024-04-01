@@ -135,7 +135,10 @@ async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
     let mut entries = vec![];
     let mut reader = tokio::fs::read_dir(file_dir).await.unwrap();
     while let Some(dir_entry) = reader.next_entry().await.unwrap() {
-        entries.push(dir_entry);
+        let meta = dir_entry.metadata().await.unwrap();
+        if meta.is_file() {
+            entries.push(dir_entry);
+        }
     }
     entries.sort_by_key(|e| e.file_name());
     entries
@@ -176,16 +179,17 @@ async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
 async fn upload_file(State(app_state): State<AppState>, mut multipart: Multipart) -> Redirect {
     while let Some(mut field) = multipart.next_field().await.unwrap() {
         if field.name() == Some("file") {
-            let mut file_name = app_state.file_dir.clone();
-            file_name.push(field.file_name().unwrap());
-            let mut file = File::create(file_name.clone()).await.unwrap();
-            while let Some(chunk) = field.chunk().await.unwrap() {
-                file.write_all(&chunk).await.unwrap();
-            }
+            if let Some(file_name) = field.file_name().filter(|n| !n.is_empty()) {
+                let mut file_path = app_state.file_dir.clone();
+                file_path.push(file_name);
+                let mut file = File::create(file_path.clone()).await.unwrap();
+                while let Some(chunk) = field.chunk().await.unwrap() {
+                    file.write_all(&chunk).await.unwrap();
+                }
 
-            println!("Uploaded {}", file_name.to_string_lossy());
-            return Redirect::to("/");
+                println!("Uploaded {}", file_path.to_string_lossy());
+            }
         }
     }
-    panic!("No file field");
+    Redirect::to("/")
 }

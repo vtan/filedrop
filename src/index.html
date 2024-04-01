@@ -4,23 +4,56 @@
   <meta charset="utf-8" />
   <title>filedrop</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    body {
+      font-size: 12pt;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 1rem auto;
+    }
+
+    input[name=file] {
+      display: block;
+    }
+  </style>
 </head>
 <body>
-  <h1>Upload a file</h1>
-  <form action="/upload" method="post" enctype="multipart/form-data">
-    <div>
-      <input type="file" name="file" required />
-    </div>
-    <button>Upload</button>
-  </form>
+  <main>
+    <h1>Upload a file</h1>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <div>
+        <input type="file" name="file" />
+      </div>
+      <button>Upload</button>
+    </form>
 
-  <h1>Uploaded files</h1>
-  <ul>
-    @{file_listing}
-  </ul>
+    <h1>Uploaded files</h1>
+    <ul>
+      @{file_listing}
+    </ul>
 
-  <h1>Connection</h1>
-  @{qr_code_listing}
+    <h1>Connection</h1>
+    @{qr_code_listing}
+  </main>
+
+  <script>
+    function onFileSelect(event) {
+      const parent = event.target.parentElement;
+      const siblings = parent.children;
+      if (event.target === siblings[siblings.length - 1]) {
+        const newInput = document.createElement("input");
+        newInput.setAttribute("type", "file");
+        newInput.setAttribute("name", "file");
+        newInput.addEventListener("change", onFileSelect);
+        parent.appendChild(newInput);
+      }
+    }
+
+    document.querySelector("input[name=file]").addEventListener("change", onFileSelect);
+  </script>
 </body>
 </html>
 ---
