@@ -4,19 +4,57 @@
   <meta charset="utf-8" />
   <title>filedrop</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
   <style>
     body {
+      font-family: serif;
       font-size: 12pt;
     }
 
+    h1 {
+      font-family: serif;
+      font-size: 18pt;
+    }
+
     main {
-      max-width: 720px;
+      max-width: 600px;
       margin: 1rem auto;
     }
 
-    input[name=file] {
+    input[name="file"] {
       display: block;
+      margin: 0 0 0.25rem 0;
+      padding: 0;
+    }
+
+    .file-listing {
+      margin: 0;
+      padding: 0;
+    }
+
+    .file-listing > li {
+      display: flex;
+      margin: 0 0 0.25rem 0;
+      padding: 0;
+    }
+
+    .file-listing > li > a {
+      flex: auto;
+    }
+
+    .connection-listing > .connection {
+      max-width: 240px;
+      display: flex;
+      padding: 1rem 1rem 1rem 0;
+    }
+
+    .connection-listing > .connection > svg {
+      flex-grow: 1;
+      flex-shrink: 0;
+      flex-basis: auto;
+      margin-right: 2rem;
+    }
+
+    .connection-listing > .connection > div {
     }
   </style>
 </head>
@@ -31,12 +69,14 @@
     </form>
 
     <h1>Uploaded files</h1>
-    <ul>
+    <ul class="file-listing">
       @{file_listing}
     </ul>
 
     <h1>Connection</h1>
-    @{qr_code_listing}
+    <div class="connection-listing">
+      @{qr_code_listing}
+    </div>
   </main>
 
   <script>
@@ -61,9 +101,13 @@
   <a href="/files/{file_name}">
     {file_name}
   </a>
+  <span>{size}<span>
 </li>
 ---
-<div>
+<div class="connection">
   @{svg}
-  <div>{url}</div>
+  <div>
+    <div>{ip}</div>
+    <div>{interface}</div>
+  </div>
 </div>

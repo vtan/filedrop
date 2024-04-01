@@ -1,6 +1,7 @@
 pub mod template;
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     path::{Path, PathBuf},
 };
@@ -12,10 +13,7 @@ use axum::{
     Router,
 };
 use qrcode::QrCode;
-use tokio::{
-    fs::{DirEntry, File},
-    io::AsyncWriteExt,
-};
+use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::services::ServeDir;
 
 use crate::template::Template;
@@ -26,11 +24,13 @@ const PORT: u16 = 8000;
 struct AppState {
     file_dir: PathBuf,
     listen_urls: Vec<ListenUrl>,
-    templates: Templates,
 }
 
 #[derive(Debug, Clone)]
 struct ListenUrl {
+    is_loopback: bool,
+    interface: String,
+    ip: String,
     url: String,
     qr_code_svg: String,
 }
@@ -42,20 +42,14 @@ struct Templates {
     qr_code_item: Template,
 }
 
+#[derive(Debug, Clone)]
+struct FileInfo {
+    name: String,
+    size: String,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let templates = {
-        let templates = Template::many(include_str!("index.html"));
-        let [root, file_list_item, qr_code_item] = templates.as_slice() else {
-            unreachable!()
-        };
-        Templates {
-            root: root.clone(),
-            file_list_item: file_list_item.clone(),
-            qr_code_item: qr_code_item.clone(),
-        }
-    };
-
     let file_dir = get_file_directory();
     if !file_dir.exists() {
         std::fs::create_dir_all(file_dir.clone()).unwrap();
@@ -63,20 +57,11 @@ async fn main() {
     let file_dir = file_dir.canonicalize().unwrap();
     println!("Storing files in {}", file_dir.to_string_lossy());
 
-    let listen_urls = {
-        let urls = list_urls();
-        urls.into_iter()
-            .map(|url| {
-                let qr_code_svg = render_url_svg(&url);
-                ListenUrl { url, qr_code_svg }
-            })
-            .collect()
-    };
+    let listen_urls = list_urls();
 
     let app_state = AppState {
         file_dir,
         listen_urls,
-        templates,
     };
 
     for url in &app_state.listen_urls {
@@ -105,17 +90,31 @@ fn get_file_directory() -> PathBuf {
     dir
 }
 
-fn list_urls() -> Vec<String> {
+fn list_urls() -> Vec<ListenUrl> {
     pnet::datalink::interfaces()
         .into_iter()
-        .filter(|interface| {
-            interface.is_up() && interface.is_lower_up() && !interface.is_loopback()
-        })
-        .flat_map(|interface| interface.ips.into_iter())
-        .filter(|ip| ip.is_ipv4())
-        .map(|ip| {
-            let ip = ip.ip();
-            format!("http://{ip}:{PORT}")
+        .filter(|interface| interface.is_lower_up())
+        .flat_map(|interface| {
+            let is_loopback = interface.is_loopback();
+            interface
+                .ips
+                .into_iter()
+                .filter(|ip| ip.is_ipv4())
+                .map(move |ip| {
+                    let ip = ip.ip();
+                    let url = format!("http://{ip}:{PORT}");
+                    let ip = ip.to_string();
+                    let interface = interface.name.clone();
+                    let qr_code_svg = render_url_svg(&url);
+
+                    ListenUrl {
+                        is_loopback,
+                        interface,
+                        ip,
+                        url,
+                        qr_code_svg,
+                    }
+                })
         })
         .collect()
 }
@@ -127,48 +126,82 @@ fn render_url_svg(url: &str) -> String {
         .min_dimensions(200, 200)
         .dark_color(qrcode::render::svg::Color("#000000"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
+        .quiet_zone(false)
         .build();
     xml.split_once("?>").unwrap().1.to_string()
 }
 
-async fn list_files(file_dir: &Path) -> Vec<DirEntry> {
-    let mut entries = vec![];
+async fn list_files(file_dir: &Path) -> Vec<FileInfo> {
+    let mut results = vec![];
     let mut reader = tokio::fs::read_dir(file_dir).await.unwrap();
     while let Some(dir_entry) = reader.next_entry().await.unwrap() {
         let meta = dir_entry.metadata().await.unwrap();
         if meta.is_file() {
-            entries.push(dir_entry);
+            let name = dir_entry.file_name().to_string_lossy().to_string();
+            let size = format_size(meta.len());
+            let file_info = FileInfo { name, size };
+            results.push(file_info);
         }
     }
-    entries.sort_by_key(|e| e.file_name());
-    entries
+    results.sort_by_key(|r| r.name.clone());
+    results
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.2} KiB", (bytes as f32) / 1024.0)
+    } else {
+        format!("{:.2} MiB", (bytes as f32) / 1024.0 / 1024.0)
+    }
 }
 
 async fn list_files_html(State(app_state): State<AppState>) -> Html<String> {
     let files = list_files(&app_state.file_dir).await;
 
-    let file_listing = app_state
-        .templates
+    let templates = {
+        let templates = if cfg!(debug_assertions) {
+            Cow::Owned(tokio::fs::read_to_string("src/index.html").await.unwrap())
+        } else {
+            Cow::Borrowed(include_str!("index.html"))
+        };
+        let templates = Template::many(&templates);
+
+        let [root, file_list_item, qr_code_item] = templates.as_slice() else {
+            unreachable!()
+        };
+        Templates {
+            root: root.clone(),
+            file_list_item: file_list_item.clone(),
+            qr_code_item: qr_code_item.clone(),
+        }
+    };
+
+    let file_listing = templates
         .file_list_item
         .render_many(files.iter().map(|file| {
-            HashMap::from([(
-                "file_name".to_string(),
-                file.file_name().to_string_lossy().to_string(),
-            )])
+            HashMap::from([
+                ("file_name".to_string(), file.name.as_str()),
+                ("size".to_string(), file.size.as_str()),
+            ])
         }));
 
-    let qr_code_listing =
+    let qr_code_listing = templates.qr_code_item.render_many(
         app_state
-            .templates
-            .qr_code_item
-            .render_many(app_state.listen_urls.iter().map(|url| {
+            .listen_urls
+            .iter()
+            .filter(|url| !url.is_loopback)
+            .map(|url| {
                 HashMap::from([
-                    ("url".to_string(), url.url.as_str()),
+                    ("interface".to_string(), url.interface.as_str()),
+                    ("ip".to_string(), url.ip.as_str()),
                     ("svg".to_string(), &url.qr_code_svg.as_str()),
                 ])
-            }));
+            }),
+    );
 
-    let html = app_state.templates.root.render(&HashMap::from([
+    let html = templates.root.render(&HashMap::from([
         ("file_listing".to_string(), file_listing.as_str()),
         ("qr_code_listing".to_string(), qr_code_listing.as_str()),
     ]));
